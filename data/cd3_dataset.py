@@ -27,7 +27,7 @@ class CD3Dataset(Dataset):
             overview=np.ones((int(self.slide.dimensions[1]/ds),int(self.slide.dimensions[0]/ds),3))
         # else, use Otsu thresholding to detect foreground
         else:
-            ds_level = np.where(np.abs(np.array(self.slide.level_downsamples)-ds)<0.2)[0][0]
+            ds_level = np.where(np.abs(np.array(self.slide.level_downsamples)-ds)<1)[0][0]
             overview = self.slide.read_region(level=ds_level, location=(0,0), size=self.slide.level_dimensions[ds_level])
             # Convert to grayscale
             gray = cv2.cvtColor(np.array(overview)[:,:,0:3],cv2.COLOR_BGR2GRAY)
@@ -52,7 +52,7 @@ class CD3Dataset(Dataset):
                 needCalculation = np.sum(activeMap[y_ds:y_ds+step_ds,x_ds:x_ds+step_ds])>0.9*step_ds*step_ds
                 if (needCalculation):
                     coordlist.append([x,y])
-        return coordlist[:100]
+        return coordlist
 
     def __len__(self):
         return len(self.coordlist)
