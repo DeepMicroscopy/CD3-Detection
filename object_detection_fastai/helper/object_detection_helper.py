@@ -43,28 +43,6 @@ def tlbr2cthw(boxes):
     return torch.cat([center, sizes], 1)
 
 
-def encode_class(idxs, n_classes):
-    target = idxs.new_zeros(len(idxs), n_classes).float()
-    mask = idxs != 0
-    i1s = torch.LongTensor(list(range(len(idxs))))
-    target[i1s[mask],idxs[mask]-1] = 1
-    return target
-
-
-def show_anchors(ancs, size):
-    _,ax = plt.subplots(1,1, figsize=(5,5))
-    ax.set_xticks(np.linspace(-1,1, size[1]+1))
-    ax.set_yticks(np.linspace(-1,1, size[0]+1))
-    ax.grid()
-    ax.scatter(ancs[:,1], ancs[:,0]) #y is first
-    ax.set_yticklabels([])
-    ax.set_xticklabels([])
-    ax.set_xlim(-1,1)
-    ax.set_ylim(1,-1) #-1 is top, 1 is bottom
-    for i, (x, y) in enumerate(zip(ancs[:, 1], ancs[:, 0])):
-        ax.annotate(i, xy = (x,y))
-
-
 def activ_to_bbox(acts, anchors, flatten=True):
     "Extrapolate bounding boxes on anchors from the model activations."
     if flatten:
@@ -83,64 +61,6 @@ def cthw2tlbr(boxes):
     return torch.cat([top_left, bot_right], 1)
 
 
-def intersection(anchors, targets):
-    "Compute the sizes of the intersections of `anchors` by `targets`."
-    ancs, tgts = cthw2tlbr(anchors), cthw2tlbr(targets)
-    a, t = ancs.size(0), tgts.size(0)
-    ancs, tgts = ancs.unsqueeze(1).expand(a,t,4), tgts.unsqueeze(0).expand(a,t,4)
-    top_left_i = torch.max(ancs[...,:2], tgts[...,:2])
-    bot_right_i = torch.min(ancs[...,2:], tgts[...,2:])
-    sizes = torch.clamp(bot_right_i - top_left_i, min=0)
-    return sizes[...,0] * sizes[...,1]
-
-
-def IoU_values(anchors, targets):
-    "Compute the IoU values of `anchors` by `targets`."
-    inter = intersection(anchors, targets)
-    anc_sz, tgt_sz = anchors[:,2] * anchors[:,3], targets[:,2] * targets[:,3]
-    union = anc_sz.unsqueeze(1) + tgt_sz.unsqueeze(0) - inter
-    return inter/(union+1e-8)
-
-
-def match_anchors(anchors, targets, match_thr=0.5, bkg_thr=0.4):
-    "Match `anchors` to targets. -1 is match to background, -2 is ignore."
-    ious = IoU_values(anchors, targets)
-    matches = anchors.new(anchors.size(0)).zero_().long() - 2
-
-    if ious.shape[1] > 0:
-        vals,idxs = torch.max(ious,1)
-        matches[vals < bkg_thr] = -1
-        matches[vals > match_thr] = idxs[vals > match_thr]
-    #Overwrite matches with each target getting the anchor that has the max IoU.
-    #vals,idxs = torch.max(ious,0)
-    #If idxs contains repetition, this doesn't bug and only the last is considered.
-    #matches[idxs] = targets.new_tensor(list(range(targets.size(0)))).long()
-    return matches
-
-def bbox_to_activ(bboxes, anchors, flatten=True):
-    "Return the target of the model on `anchors` for the `bboxes`."
-    if flatten:
-        t_centers = (bboxes[...,:2] - anchors[...,:2]) / anchors[...,2:]
-        t_sizes = torch.log(bboxes[...,2:] / anchors[...,2:] + 1e-8)
-        return torch.cat([t_centers, t_sizes], -1).div_(bboxes.new_tensor([[0.1, 0.1, 0.2, 0.2]]))
-    else: return [activ_to_bbox(act,anc) for act,anc in zip(acts, anchors)]
-    return res
-
-def nms(boxes, scores, thresh=0.5):
-    idx_sort = scores.argsort(descending=True)
-    boxes, scores = boxes[idx_sort], scores[idx_sort]
-    to_keep, indexes = [], torch.LongTensor(range_of(scores))
-    while len(scores) > 0:
-        #pdb.set_trace()
-        to_keep.append(idx_sort[indexes[0]])
-        iou_vals = IoU_values(boxes, boxes[:1]).squeeze()
-        mask_keep = iou_vals <= thresh
-        mask_keep_nonzero = torch.nonzero(mask_keep)
-        if len(mask_keep_nonzero) == 0: break
-        boxes, scores, indexes = boxes[mask_keep], scores[mask_keep], indexes[mask_keep]
-    return torch.LongTensor(to_keep)
-
-
 def process_output(clas_pred, bbox_pred, anchors, detect_thresh=0.25):
     bbox_pred = activ_to_bbox(bbox_pred, anchors.to(clas_pred.device))
     clas_pred = torch.sigmoid(clas_pred)
@@ -155,18 +75,74 @@ def process_output(clas_pred, bbox_pred, anchors, detect_thresh=0.25):
     return bbox_pred, scores, preds
 
 
-def rescale_boxes(bboxes, t_sz: torch.Tensor):
-
-    bboxes[:, 2:] = bboxes[:, 2:] * t_sz / 2
-    bboxes[:, :2] = (bboxes[:, :2] + 1) * t_sz / 2
-
-    return bboxes
-
 def rescale_box(bboxes, size: torch.Tensor):
     bboxes[:, :2] = bboxes[:, :2] - bboxes[:, 2:] / 2
     bboxes[:, :2] = (bboxes[:, :2] + 1) * size / 2
     bboxes[:, 2:] = bboxes[:, 2:] * size / 2
     bboxes = bboxes.long()
     return bboxes
+
+# Malisiewicz et al.
+def nms(boxes, scores, return_ids=False, nms_thresh=0.4):
+    # if there are no boxes, return an empty list
+    if len(boxes) == 0:
+        return []
+
+    # if the bounding boxes integers, convert them to floats --
+    # this is important since we'll be doing a bunch of divisions
+    boxes = boxes.float()
+
+    # initialize the list of picked indexes
+    pick = []
+
+    # convert boxes cthw2tlbr
+    boxes = cthw2tlbr(boxes)
+
+    # grab the coordinates of the bounding boxes
+    x1 = boxes[:, 0]
+    y1 = boxes[:, 1]
+    x2 = boxes[:, 2]
+    y2 = boxes[:, 3]
+
+    # compute the area of the bounding boxes and sort the bounding
+    # boxes by the bottom-right y-coordinate of the bounding box
+    area = (x2 - x1 + 1) * (y2 - y1 + 1)
+    idxs = np.argsort(scores)
+
+    # keep looping while some indexes still remain in the indexes
+    # list
+    while len(idxs) > 0:
+        # grab the last index in the indexes list and add the
+        # index value to the list of picked indexes
+        last = len(idxs) - 1
+        i = idxs[last]
+        pick.append(i)
+
+        # find the largest (x, y) coordinates for the start of
+        # the bounding box and the smallest (x, y) coordinates
+        # for the end of the bounding box
+        xx1 = np.maximum(x1[i], x1[idxs[:last]])
+        yy1 = np.maximum(y1[i], y1[idxs[:last]])
+        xx2 = np.minimum(x2[i], x2[idxs[:last]])
+        yy2 = np.minimum(y2[i], y2[idxs[:last]])
+
+        # compute the width and height of the bounding box
+        w = np.maximum(0, xx2 - xx1 + 1)
+        h = np.maximum(0, yy2 - yy1 + 1)
+
+        # compute the ratio of overlap
+        overlap = (w * h) / area[idxs[:last]]
+
+        # delete all indexes from the index list that have
+        idxs = np.delete(idxs, np.concatenate(([last],
+                                               np.where(overlap > nms_thresh)[0])))
+
+    # return only the bounding boxes that were picked using the
+    # integer data type
+    if return_ids:
+        return np.array(pick)
+    else:
+        return boxes[np.array(pick)]
+
 
 
