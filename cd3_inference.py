@@ -28,15 +28,15 @@ def visualize_detections(slide, detections, ds=1):
         cv2.rectangle(slide_image, (x1//ds, y1//ds), (x2//ds, y2//ds), color, 2)
     return slide_image
 
-def load_model_and_anchors(model_path):
+def load_model_and_anchors():
     print('Loading model')
     anchors = create_anchors(sizes=[(32, 32), (16, 16), (8, 8), (4, 4)], ratios=[0.5, 1, 2],scales=[0.5, 0.75, 1, 1.25, 1.5])
     encoder = create_body(resnet18(), pretrained=False, cut=-2)
     model = RetinaNet(encoder, n_classes=4, n_anchors=15, sizes=[32, 16, 8, 4], chs=128, final_bias=-4., n_conv=3)
-    model.load_state_dict(torch.load(os.path.join(os.getcwd(), 'ckpts', f'{model_path}.pth'), map_location=torch.device('cpu'))['model'])
+    model.load_state_dict(torch.load(os.path.join(os.getcwd(), 'ckpts', 'pan_tumor.pth'), map_location=torch.device('cpu'))['model'])
     return model, anchors
 
-def inference(dataloader, model, anchors, device, patch_size, down_factor, detect_thresh=0.5, nms_thresh=0.5):
+def inference(dataloader, model, anchors, device, patch_size, down_factor, detect_thresh=0.5, nms_thresh=0.4):
     classes = ['IMMUNE CELL', 'NON-TUMOR CELL', 'TUMOR CELL']
     class_pred_batch, bbox_pred_batch, x_coordinates, y_coordinates = [], [], [], []
     patch_counter = 0
@@ -86,14 +86,14 @@ def inference(dataloader, model, anchors, device, patch_size, down_factor, detec
             detections.append([int(x1), int(y1), int(x2), int(y2), float(score), classes[int(pred)]])
     return detections
 
-def process(slide_dir, model_path, level, patch_size, detect_thresh, visualize):
+def process(slide_dir, level, patch_size, detect_thresh, visualize):
     device = torch.device('mps' if torch.backends.mps.is_available() else 'cuda' if torch.cuda.is_available() else 'cpu') 
-    model, anchors = load_model_and_anchors(model_path)
+    model, anchors = load_model_and_anchors()
     model = model.eval().to(device)
-    os.makedirs(os.path.join(slide_dir, 'processing', model_path), exist_ok=True)
+    os.makedirs(os.path.join(slide_dir, 'processing'), exist_ok=True)
 
     # Iterate through slides in folder.
-    print(f'Running inference with {model_path}.pth model on all slides in folder {slide_dir} using a patch size of {patch_size}x{patch_size} at resolution level {level}')
+    print(f'Running inference on all slides in folder {slide_dir} using a patch size of {patch_size}x{patch_size} at resolution level {level}')
     for file in os.listdir(slide_dir):
         print(f'Slide {file}')
         slide = openslide.open_slide(os.path.join(slide_dir, file))
@@ -101,7 +101,7 @@ def process(slide_dir, model_path, level, patch_size, detect_thresh, visualize):
         dl = DataLoader(ds, num_workers=0, batch_size=8)
         detections = inference(dl, model, anchors, device, patch_size, slide.level_downsamples[level], detect_thresh)
         detection_df = pd.DataFrame(detections, columns=['x1','y1','x2','y2','score','class'])
-        result_path = os.path.join(slide_dir, 'processing', model_path, f"{file.split('.')[0]}.csv")
+        result_path = os.path.join(slide_dir, 'processing', f"{file.split('.')[0]}.csv")
         detection_df.to_csv(result_path, index=False)
         print('Stored results at', result_path)
         # Visualize results 
@@ -113,15 +113,14 @@ def process(slide_dir, model_path, level, patch_size, detect_thresh, visualize):
 def main():
     parser = argparse.ArgumentParser(description='Inference for T-lyphocyte detection on CD3-stained IHC samples')
     parser.add_argument('--slide_dir', type=str, help='Slide directory')
-    parser.add_argument('--model_path', type=str, help='Model weights', default='pan_tumor', choices=['hnscc', 'nsclc', 'tnbc', 'gc', 'pan_tumor'])
     parser.add_argument('--level', type=int, help='Resolution level (models were trained on level 0, i.e. 0.25 um/pixel)', default=0)
     parser.add_argument('--patch_size', type=int, help='Patch size (models were trained on 256 x 256 pixels)', default=256)
     parser.add_argument('--detect_thresh', type=int, help='Confidence threshold for detections. Lower threshold increases recall, higher threshold increases specificity.', default=0.5)
-    parser.add_argument('--visualize', type=bool, help='Flag for exporting detection results as png.', default=False)
+    parser.add_argument('--visualize', type=bool, help='Flag for exporting detection results as png.', default=True)
     args = parser.parse_args()
 
     # Call inference function with parsed arguments
-    process(slide_dir=args.slide_dir, model_path=args.model_path, level=args.level, patch_size=args.patch_size, detect_thresh=args.detect_thresh, visualize=args.visualize)
+    process(slide_dir=args.slide_dir, level=args.level, patch_size=args.patch_size, detect_thresh=args.detect_thresh, visualize=args.visualize)
 
 if __name__ == "__main__":
     main()
