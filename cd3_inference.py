@@ -117,10 +117,11 @@ def main():
     parser.add_argument('--level', type=int, help='Resolution level (models were trained on level 0, i.e. 0.25 um/pixel)', default=0)
     parser.add_argument('--patch_size', type=int, help='Patch size (models were trained on 256 x 256 pixels)', default=256)
     parser.add_argument('--detect_thresh', type=int, help='Confidence threshold for detections. Lower threshold increases recall, higher threshold increases specificity.', default=0.5)
+    parser.add_argument('--visualize', type=bool, help='Flag for exporting detection results as png.', default=False)
     args = parser.parse_args()
 
     # Call inference function with parsed arguments
-    process(slide_dir=args.slide_dir, model_path=args.model_path, level=args.level, patch_size=args.patch_size, detect_thresh=args.detect_thresh, visualize=False)
+    process(slide_dir=args.slide_dir, model_path=args.model_path, level=args.level, patch_size=args.patch_size, detect_thresh=args.detect_thresh, visualize=args.visualize)
 
 if __name__ == "__main__":
     main()
