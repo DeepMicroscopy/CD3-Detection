@@ -6,7 +6,7 @@ import torch
 import cv2
 
 class CD3Dataset(Dataset):
-    def __init__(self, slide, level, patch_size, mean = torch.FloatTensor([0.7404, 0.7662, 0.7805]), std = torch.FloatTensor([0.1504, 0.1313, 0.1201])):
+    def __init__(self, slide, level, patch_size, mean = torch.FloatTensor([0.7324, 0.7587, 0.7719]), std = torch.FloatTensor([0.147 , 0.132 , 0.1246])):
         self.slide = slide
         self.level = level
         self.down_factor = self.slide.level_downsamples[level] 
