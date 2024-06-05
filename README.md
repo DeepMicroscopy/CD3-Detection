@@ -28,21 +28,22 @@ The script provides the following functionalities:
 The script can be run from the command line with the following command:
 
 ```
-python inference_script.py --slide_dir <path_to_slide_directory> --level <resolution_level> --patch_size <patch_size> --detect_thresh <detect_thresh> --visualize <visualize>
+python inference_script.py --slide_dir <path_to_slide_directory> --level <resolution_level> --patch_size <patch_size> --checkpoint <checkpoint> --detect_thresh <detect_thresh> --visualize <visualize>
 ```
 
 - *slide_dir*: Path to the directory containing slide images.
 - *level*: Resolution level (0 for the original resolution, higher levels for downsampled resolutions).
 - *patch_size*: Size of the patches to be processed by the model (default is 256 x 256 pixels).
+- *checkpoint*: Model that is used for inference. Options are 'HNSCC', 'NSCLC', 'TNBC', 'GC', and 'all' (default is 'all', which was trained on all tumor indications).
 - *detect_thresh*: Confidence threshold for detection. Lower threshold increases recall, higher threshold increases specificity (default is 0.5).
 - *visualize*: Flag for exporting visual detection results. Default is FALSE. 
 
 ## Example Usage
 ```
-python inference_script.py --slide_dir /path/to/slides --level 0 --patch_size 256 --detect_thresh 0.5 --visualize True
+python inference_script.py --slide_dir /path/to/slides --level 0 --patch_size 256 --checkpoint GC --detect_thresh 0.5 --visualize True
 ```
 
-This command performs inference using all available pre-trained models on the slide images in the specified directory at the original resolution (level 0) with a patch size of 256 x 256 pixels using a detection threshold of 0.5. The comman will create a detection .csv and result .png for each slide. 
+This command performs inference using the GC model on the slide images in the specified directory at the original resolution (level 0) with a patch size of 256 x 256 pixels using a detection threshold of 0.5. The comman will create a detection .csv and result .png for each slide. 
 
 ## Note
 

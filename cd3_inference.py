@@ -28,12 +28,12 @@ def visualize_detections(slide, detections, ds=1):
         cv2.rectangle(slide_image, (x1//ds, y1//ds), (x2//ds, y2//ds), color, 2)
     return slide_image
 
-def load_model_and_anchors():
+def load_model_and_anchors(checkpoint):
     print('Loading model')
     anchors = create_anchors(sizes=[(32, 32), (16, 16), (8, 8), (4, 4)], ratios=[0.5, 1, 2],scales=[0.5, 0.75, 1, 1.25, 1.5])
     encoder = create_body(resnet18(), pretrained=False, cut=-2)
     model = RetinaNet(encoder, n_classes=4, n_anchors=15, sizes=[32, 16, 8, 4], chs=128, final_bias=-4., n_conv=3)
-    model.load_state_dict(torch.load(os.path.join(os.getcwd(), 'ckpts', 'pan_tumor.pth'), map_location=torch.device('cpu'))['model'])
+    model.load_state_dict(torch.load(os.path.join(os.getcwd(), 'ckpts', '{}.pth'.format(checkpoint)), map_location=torch.device('cpu'))['model'])
     return model, anchors
 
 def inference(dataloader, model, anchors, device, patch_size, down_factor, detect_thresh=0.5, nms_thresh=0.4):
@@ -86,15 +86,15 @@ def inference(dataloader, model, anchors, device, patch_size, down_factor, detec
             detections.append([int(x1), int(y1), int(x2), int(y2), float(score), classes[int(pred)]])
     return detections
 
-def process(slide_dir, level, patch_size, detect_thresh, visualize):
+def process(slide_dir, level, patch_size, checkpoint, detect_thresh, visualize):
     device = torch.device('mps' if torch.backends.mps.is_available() else 'cuda' if torch.cuda.is_available() else 'cpu') 
-    model, anchors = load_model_and_anchors()
+    model, anchors = load_model_and_anchors(checkpoint)
     model = model.eval().to(device)
     os.makedirs(os.path.join(slide_dir, 'processing'), exist_ok=True)
 
     # Iterate through slides in folder.
     print(f'Running inference on all slides in folder {slide_dir} using a patch size of {patch_size}x{patch_size} at resolution level {level}')
-    for file in os.listdir(slide_dir):
+    for file in [slide for slide in os.listdir(slide_dir) if not os.path.isdir(os.path.join(slide_dir, slide))]:
         print(f'Slide {file}')
         slide = openslide.open_slide(os.path.join(slide_dir, file))
         ds = CD3Dataset(slide, level, patch_size)
@@ -115,12 +115,13 @@ def main():
     parser.add_argument('--slide_dir', type=str, help='Slide directory')
     parser.add_argument('--level', type=int, help='Resolution level (models were trained on level 0, i.e. 0.25 um/pixel)', default=0)
     parser.add_argument('--patch_size', type=int, help='Patch size (models were trained on 256 x 256 pixels)', default=256)
+    parser.add_argument('--checkpoint', type=str, help='Model checkpoint', default='all', choices=['all', 'HNSCC', 'NSCLC', 'TNBC', 'GC'])
     parser.add_argument('--detect_thresh', type=int, help='Confidence threshold for detections. Lower threshold increases recall, higher threshold increases specificity.', default=0.5)
     parser.add_argument('--visualize', type=bool, help='Flag for exporting detection results as png.', default=True)
     args = parser.parse_args()
 
     # Call inference function with parsed arguments
-    process(slide_dir=args.slide_dir, level=args.level, patch_size=args.patch_size, detect_thresh=args.detect_thresh, visualize=args.visualize)
+    process(slide_dir=args.slide_dir, level=args.level, patch_size=args.patch_size, checkpoint=args.checkpoint, detect_thresh=args.detect_thresh, visualize=args.visualize)
 
 if __name__ == "__main__":
     main()
